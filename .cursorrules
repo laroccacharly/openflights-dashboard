@@ -1,0 +1,102 @@
+Goal is to create a dashboard for the openflights datasets. 
+
+# Project Overview
+This project creates an interactive dashboard for visualizing and analyzing OpenFlights data, including airports and routes worldwide. The application uses Docker for containerization, Streamlit for the UI, and fireducks (pandas-compatible) for data processing.
+
+# Data Sources
+
+## Airports Database
+The airports database contains information about airports worldwide with the following fields:
+- Airport ID: Unique OpenFlights identifier for this airport.
+- Name: Name of airport. May or may not contain the City name.
+- City: Main city served by airport. May be spelled differently from Name.
+- Country: Country or territory where airport is located.
+- IATA: 3-letter IATA code. Null if not assigned/unknown.
+- ICAO: 4-letter ICAO code. Null if not assigned.
+- Latitude: Decimal degrees, usually to six significant digits. Negative is South, positive is North.
+- Longitude: Decimal degrees, usually to six significant digits. Negative is West, positive is East.
+- Altitude: In feet.
+- Timezone: Hours offset from UTC. Fractional hours are expressed as decimals, eg. India is 5.5.
+- DST: Daylight savings time. One of E (Europe), A (US/Canada), S (South America), O (Australia), Z (New Zealand), N (None) or U (Unknown).
+- Tz database timezone: Timezone in "tz" (Olson) format, eg. "America/Los_Angeles".
+- Type: Type of the airport. Value "airport" for air terminals, "station" for train stations, "port" for ferry terminals and "unknown" if not known.
+- Source: Source of this data. "OurAirports" for data sourced from OurAirports, "Legacy" for old data not matched to OurAirports, "User" for unverified user contributions.
+
+Data URL: https://raw.githubusercontent.com/jpatokal/openflights/master/data/airports.dat
+
+Sample entries:
+```
+324,"All Nippon Airways","ANA All Nippon Airways","NH","ANA","ALL NIPPON","Japan","Y"
+412,"Aerolineas Argentinas",\N,"AR","ARG","ARGENTINA","Argentina","Y"
+413,"Arrowhead Airways",\N,"","ARH","ARROWHEAD","United States","N"
+```
+
+## Route Database
+The routes database contains information about flight routes with the following fields:
+- Airline: 2-letter (IATA) or 3-letter (ICAO) code of the airline.
+- Airline ID: Unique OpenFlights identifier for airline.
+- Source airport: 3-letter (IATA) or 4-letter (ICAO) code of the source airport.
+- Source airport ID: Unique OpenFlights identifier for source airport.
+- Destination airport: 3-letter (IATA) or 4-letter (ICAO) code of the destination airport.
+- Destination airport ID: Unique OpenFlights identifier for destination airport.
+- Codeshare: "Y" if this flight is a codeshare (not operated by Airline, but another carrier), empty otherwise.
+- Stops: Number of stops on this flight ("0" for direct).
+- Equipment: 3-letter codes for plane type(s) generally used on this flight, separated by spaces.
+
+Data URL: https://raw.githubusercontent.com/jpatokal/openflights/master/data/routes.dat
+
+Sample entries:
+```
+BA,1355,SIN,3316,LHR,507,,0,744 777
+BA,1355,SIN,3316,MEL,3339,Y,0,744
+TOM,5013,ACE,1055,BFS,465,,0,320
+```
+
+Notes:
+- Routes are directional: if an airline operates services from A to B and from B to A, both A-B and B-A are listed separately.
+- Routes where one carrier operates both its own and codeshare flights are listed only once.
+- The special value \N is used for "NULL" to indicate that no value is available.
+
+# Project Structure
+- `src/app.py`: Main application entry point
+- `src/ui.py`: Streamlit UI implementation
+- `config.py`: Configuration settings for Docker and application
+- `build.py`: Script to build the Docker image
+- `run.py`: Script to run the application in Docker
+- `run_ui.py`: Script to run the Streamlit UI in Docker
+
+# Development Tools
+- Docker: Used for containerization and environment consistency
+- uv: Python package manager and runner
+- fireducks: Data processing library with pandas-compatible API
+- Streamlit: Framework for building the dashboard UI
+
+# Running the Application
+1. Build the Docker image:
+   ```
+   uv run build.py
+   ```
+
+2. Run the main application:
+   ```
+   uv run run.py
+   ```
+
+3. Run the Streamlit UI:
+   ```
+   uv run run_ui.py
+   ```
+   The UI will be available at http://localhost:8501
+
+# Data Processing
+For data processing, use fireducks with the pandas API:
+```python
+import fireducks.pandas as pd
+```
+
+# Configuration
+To modify configuration settings, edit the `config.py` file which contains:
+- Docker image and container settings
+- Port mappings
+- Volume mounts
+- Application commands

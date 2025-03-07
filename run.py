@@ -5,8 +5,12 @@ import os
 import json
 from config import CONTAINER_NAME, PORT_MAPPINGS, ENVIRONMENT_VARS, VOLUMES, PLATFORM, APP_COMMAND, FULL_IMAGE_NAME
 
-def run_docker_container():
-    """Run the Docker container."""
+def run_docker_container(run_app=True):
+    """Run the Docker container.
+    
+    Args:
+        run_app (bool): Whether to run the application command after starting the container.
+    """
     # Check if container exists and is running
     container_exists = False
     container_running = False
@@ -81,19 +85,22 @@ def run_docker_container():
     elif container_running:
         print(f"Container '{CONTAINER_NAME}' is already running.")
     
-    # Run the application using docker exec
-    print(f"Running application with command: {' '.join(APP_COMMAND)}")
-    # Use bash to ensure proper environment setup
-    exec_cmd = ["docker", "exec", "-it", CONTAINER_NAME, "bash", "-c", f"cd /app && {' '.join(APP_COMMAND)}"]
-    
-    result = subprocess.run(
-        exec_cmd,
-        check=False
-    )
-    
-    if result.returncode != 0:
-        print(f"Application exited with error code: {result.returncode}")
-        sys.exit(1)
+    # Run the application using docker exec if run_app is True
+    if run_app:
+        print(f"Running application with command: {' '.join(APP_COMMAND)}")
+        # Use bash to ensure proper environment setup
+        exec_cmd = ["docker", "exec", "-it", CONTAINER_NAME, "bash", "-c", f"cd /app && {' '.join(APP_COMMAND)}"]
+        
+        result = subprocess.run(
+            exec_cmd,
+            check=False
+        )
+        
+        if result.returncode != 0:
+            print(f"Application exited with error code: {result.returncode}")
+            sys.exit(1)
+    else:
+        print("Container is ready. Not running application command.")
 
 if __name__ == "__main__":
     run_docker_container() 

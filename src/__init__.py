@@ -1,0 +1,3 @@
+"""
+OpenFlights Dashboard package.
+""" 

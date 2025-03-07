@@ -6,8 +6,11 @@ WORKDIR /app
 RUN pip install uv
 
 RUN uv init 
-# Install fireducks using uv
-RUN uv add fireducks
+# Install fireducks and other dependencies using uv
+RUN uv add fireducks streamlit pandas plotly pydeck requests numpy
+
+# Expose port for Streamlit
+EXPOSE 8501
 
 # No ENTRYPOINT - we'll use docker exec to run commands directly
 
