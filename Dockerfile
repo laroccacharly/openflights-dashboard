@@ -1,5 +1,8 @@
 FROM python:3.13
 
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
 WORKDIR /app
 
 # Install uv
@@ -12,7 +15,7 @@ RUN uv add fireducks streamlit pandas plotly pydeck requests numpy
 # Expose port for Streamlit
 EXPOSE 8501
 
-# No ENTRYPOINT - we'll use docker exec to run commands directly
+COPY main.py .
+COPY src/ src/
 
-# Default command (just keeps container running)
-CMD ["tail", "-f", "/dev/null"]
+CMD ["uv", "run", "streamlit", "run", "--server.address=0.0.0.0", "--server.port=8501", "main.py"]

@@ -1,7 +1,0 @@
-[project]
-name = "openflights-dashboard"
-version = "0.1.0"
-description = "Dashboard for visualizing OpenFlights data"
-readme = "README.md"
-requires-python = ">=3.13"
-dependencies = []

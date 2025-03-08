@@ -1,3 +1,1 @@
-"""
-OpenFlights Dashboard package.
-""" 
+from .ui import run_ui

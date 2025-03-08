@@ -6,7 +6,7 @@ Running with 'uv run' instead of 'python'.
 """
 
 import fireducks.pandas as pd
-from data import get_data
+from .data import get_data
 
 def main():
     print("Starting OpenFlights Dashboard application...")
