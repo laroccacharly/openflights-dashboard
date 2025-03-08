@@ -6,9 +6,23 @@ This module handles downloading, caching, and loading the OpenFlights datasets.
 
 import os
 import requests
-import fireducks.pandas as pd
+# import fireducks.pandas as pd
+from .pandas import pd 
+import time
+import logging
+import sys
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, List
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger('openflights-data')
 
 # Data source URLs
 AIRPORTS_URL = "https://raw.githubusercontent.com/jpatokal/openflights/master/data/airports.dat"

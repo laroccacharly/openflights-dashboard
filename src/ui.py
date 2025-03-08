@@ -1,10 +1,14 @@
 import streamlit as st
-import fireducks.pandas as pd
+from .pandas import pd 
 import os
 import numpy as np
 import plotly.express as px
+import time
+import logging
 from .data import get_data
 
+# Configure logging for UI
+logger = logging.getLogger('openflights-ui')
 
 def run_ui():
     # Set page configuration
@@ -19,13 +23,18 @@ def run_ui():
     st.title("✈️ OpenFlights Dashboard")
 
     # Load data
-    with st.spinner("Loading OpenFlights data..."):
-        try:
-            airports_df, routes_df = get_data()
-            st.success(f"Successfully loaded {len(airports_df)} airports and {len(routes_df)} routes!")
-        except Exception as e:
-            st.error(f"Error loading data: {str(e)}")
-            st.stop()
+    if 'airports_df' not in st.session_state or 'routes_df' not in st.session_state:
+        with st.spinner("Loading OpenFlights data..."):
+            try:
+                st.session_state.airports_df, st.session_state.routes_df = get_data()
+                st.success(f"Successfully loaded {len(st.session_state.airports_df)} airports and {len(st.session_state.routes_df)} routes!")
+            except Exception as e:
+                st.error(f"Error loading data: {str(e)}")
+                st.stop()
+    
+    # Use the data from session state
+    airports_df = st.session_state.airports_df
+    routes_df = st.session_state.routes_df
 
     # Sidebar for filtering
     st.sidebar.title("Filters")
@@ -110,9 +119,128 @@ def run_ui():
         st.info("No airports to display on the map with the current filters.")
 
     # Display data tables
-    st.subheader("Airport Data Table")
-    st.dataframe(filtered_airports, use_container_width=True)
-
+    # Airport Connectivity Analysis
+    st.header("Airport Routes Analysis")
+    st.write("This analysis joins the airports and routes datasets to analyze airport connectivity.")
+    
+    # Add a button to run the analysis (to avoid running it automatically every time)
+    if st.button("Run Routes Analysis"):
+        with st.spinner("Analyzing airport routes..."):
+            # Benchmark the join operation
+            start_time = time.time()
+            
+            # Outbound routes (departures)
+            outbound_routes = routes_df.groupby('source_airport_id').size().reset_index(name='outbound_routes')
+            
+            # Inbound routes (arrivals)
+            inbound_routes = routes_df.groupby('destination_airport_id').size().reset_index(name='inbound_routes')
+            
+            # Join with airports data
+            # First, join with outbound routes
+            connectivity_df = pd.merge(
+                airports_df,
+                outbound_routes,
+                left_on='airport_id',
+                right_on='source_airport_id',
+                how='left'
+            )
+            
+            # Then, join with inbound routes
+            connectivity_df = pd.merge(
+                connectivity_df,
+                inbound_routes,
+                left_on='airport_id',
+                right_on='destination_airport_id',
+                how='left'
+            )
+            
+            # Fill NaN values with 0 (airports with no routes)
+            connectivity_df['outbound_routes'] = connectivity_df['outbound_routes'].fillna(0).astype(int)
+            connectivity_df['inbound_routes'] = connectivity_df['inbound_routes'].fillna(0).astype(int)
+            
+            # Calculate total connectivity (sum of inbound and outbound routes)
+            connectivity_df['total_connectivity'] = connectivity_df['outbound_routes'] + connectivity_df['inbound_routes']
+            
+            # Calculate connectivity ratio (outbound/inbound)
+            connectivity_df['connectivity_ratio'] = np.where(
+                connectivity_df['inbound_routes'] > 0,
+                connectivity_df['outbound_routes'] / connectivity_df['inbound_routes'],
+                np.nan
+            )
+            
+            # End benchmark
+            end_time = time.time()
+            execution_time = end_time - start_time
+            
+            # Display benchmark results
+            st.subheader("Benchmark Results")
+            st.info(f"Join operation completed in {execution_time:.2f} seconds")
+            
+            # Filter for the selected countries if any
+            if selected_countries:
+                connectivity_df = connectivity_df[connectivity_df['country'].isin(selected_countries)]
+            
+            # Display the top 20 most connected airports
+            st.subheader("Top 20 Most Connected Airports")
+            top_connected = connectivity_df.sort_values('total_connectivity', ascending=False).head(20)
+            
+            # Create a bar chart for the top connected airports
+            fig = px.bar(
+                top_connected,
+                x='name',
+                y='total_connectivity',
+                hover_data=['city', 'country', 'outbound_routes', 'inbound_routes'],
+                color='country',
+                title="Top 20 Most Connected Airports",
+                labels={'name': 'Airport', 'total_connectivity': 'Total Routes (In + Out)'}
+            )
+            
+            fig.update_layout(xaxis_tickangle=-45)
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Create a scatter plot of outbound vs inbound routes
+           
+            
+            # Display connectivity statistics
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Avg. Outbound Routes", f"{connectivity_df['outbound_routes'].mean():.1f}")
+            with col2:
+                st.metric("Avg. Inbound Routes", f"{connectivity_df['inbound_routes'].mean():.1f}")
+            with col3:
+                st.metric("Max Total Connectivity", int(connectivity_df['total_connectivity'].max()))
+            
+            # Display the connectivity data table
+            st.subheader("Airport Connectivity Data")
+            st.dataframe(
+                connectivity_df[[
+                    'name', 'city', 'country', 'iata', 
+                    'outbound_routes', 'inbound_routes', 'total_connectivity', 'connectivity_ratio'
+                ]].sort_values('total_connectivity', ascending=False),
+                use_container_width=True
+            )
+            
+            # Calculate and display network statistics
+            st.subheader("Network Statistics")
+            
+            # Number of airports with at least one route
+            connected_airports = len(connectivity_df[connectivity_df['total_connectivity'] > 0])
+            
+            # Percentage of airports that are connected
+            connected_percentage = (connected_airports / len(connectivity_df)) * 100
+            
+            # Average degree (average number of connections per airport)
+            avg_degree = connectivity_df['total_connectivity'].mean()
+            
+            # Display statistics
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Connected Airports", connected_airports)
+            with col2:
+                st.metric("Connected Percentage", f"{connected_percentage:.1f}%")
+            with col3:
+                st.metric("Average Degree", f"{avg_degree:.1f}")
+    
     # Footer
     st.markdown("---")
-    st.markdown("Data source: [OpenFlights](https://openflights.org/data.html)") 
+    st.markdown("Data source: [OpenFlights](https://openflights.org)") 
