@@ -14,10 +14,9 @@ logger = logging.getLogger('openflights-ui')
 # ===== Utility Functions =====
 
 def haversine_distance(lat1, lon1, lat2, lon2):
-    """
-    Calculate the great circle distance between two points 
-    on the earth (specified in decimal degrees)
-    """
+
+    
+    # Calculate the distance if not in cache
     # Convert decimal degrees to radians
     lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
     
@@ -27,7 +26,8 @@ def haversine_distance(lat1, lon1, lat2, lon2):
     a = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon/2)**2
     c = 2 * math.asin(math.sqrt(a))
     r = 6371  # Radius of earth in kilometers
-    return c * r
+    distance = c * r
+    return distance
 
 # ===== Data Loading Functions =====
 
@@ -189,6 +189,23 @@ def calculate_network_stats(connectivity_df):
         'avg_degree': avg_degree
     }
 
+def time_operation(operation_name, func, *args, **kwargs):
+    """Time an operation and store the result in session state"""
+    # Initialize timing dictionary if not exists
+    if 'execution_times' not in st.session_state:
+        st.session_state.execution_times = {}
+    
+    start_time = time.time()
+    result = func(*args, **kwargs)
+    end_time = time.time()
+    
+    execution_time = end_time - start_time
+    # Store the execution time
+    st.session_state.execution_times[operation_name] = execution_time
+    logger.info(f"Operation '{operation_name}' completed in {execution_time:.2f} seconds")
+    
+    return result, execution_time
+
 # ===== UI Components =====
 
 def setup_page_config():
@@ -327,6 +344,38 @@ def display_route_distance_histogram(valid_routes):
     # Display the histogram
     st.plotly_chart(fig_dist, use_container_width=True)
 
+def display_degree_histogram(connectivity_df):
+    """Display histogram of airport connectivity degrees (in + out)"""
+    
+    # Create a histogram of degree distribution
+    fig_degree = px.histogram(
+        connectivity_df,
+        x='total_connectivity',
+        nbins=50,
+        title="Distribution of Airport Connectivity Degrees (In + Out)",
+        labels={'total_connectivity': 'Degree (Total Routes)', 'count': 'Number of Airports'},
+        marginal="box"  # Add a box plot on the marginal axis
+    )
+    
+    # Add some statistics as annotations
+    avg_degree = connectivity_df['total_connectivity'].mean()
+    median_degree = connectivity_df['total_connectivity'].median()
+    max_degree = connectivity_df['total_connectivity'].max()
+    
+    fig_degree.add_annotation(
+        x=0.95, y=0.95,
+        xref="paper", yref="paper",
+        text=f"Average: {avg_degree:.1f}<br>Median: {median_degree:.0f}<br>Max: {max_degree:.0f}",
+        showarrow=False,
+        font=dict(size=12),
+        bgcolor="black",
+        bordercolor="white",
+        borderwidth=1
+    )
+    
+    # Display the histogram
+    st.plotly_chart(fig_degree, use_container_width=True)
+
 def display_connectivity_metrics(connectivity_df):
     """Display connectivity metrics"""
     col1, col2, col3 = st.columns(3)
@@ -371,60 +420,101 @@ def display_footer():
     st.markdown("---")
     st.markdown("Data source: [OpenFlights](https://openflights.org)")
 
+def display_execution_times():
+    """Display execution times for all tracked computations"""
+    st.subheader("Operation Execution Times")
+    
+    if 'execution_times' not in st.session_state or not st.session_state.execution_times:
+        st.info("No operations have been timed yet.")
+        return
+    
+    # Create a dataframe from the execution times
+    times_df = pd.DataFrame({
+        'Operation': list(st.session_state.execution_times.keys()),
+        'Execution Time (seconds)': list(st.session_state.execution_times.values())
+    })
+    
+    # Sort by execution time (descending)
+    times_df = times_df.sort_values('Execution Time (seconds)', ascending=False)
+    
+    # Also display as a table
+    st.dataframe(times_df, use_container_width=True)
+    
+    # Add option to clear timing data
+    if st.button("Clear Timing Data"):
+        st.session_state.execution_times = {}
+        st.experimental_rerun()
+
 # ===== Main UI Function =====
 
 def run_routes_analysis(st, airports_df, routes_df, selected_countries):
     """Run the routes analysis and display the results"""
     with st.spinner("Analyzing airport routes..."):
-        # Benchmark the join operation
-        start_time = time.time()
-        
         # Calculate connectivity statistics
-        connectivity_df = calculate_connectivity_stats(airports_df, routes_df)
+        connectivity_df, conn_time = time_operation(
+            "Calculate Connectivity Statistics",
+            calculate_connectivity_stats,
+            airports_df, routes_df
+        )
         
         # Filter for the selected countries if any
         filtered_connectivity_df = connectivity_df
         if selected_countries:
-            filtered_connectivity_df = connectivity_df[connectivity_df['country'].isin(selected_countries)]
+            filtered_connectivity_df, filter_time = time_operation(
+                "Filter Connectivity by Countries",
+                lambda df, countries: df[df['country'].isin(countries)],
+                connectivity_df, selected_countries
+            )
         
-        # End benchmark
-        end_time = time.time()
-        execution_time = end_time - start_time
-        
-        # Display benchmark results
-        st.subheader("Benchmark Results")
-        st.info(f"Join operation completed in {execution_time:.2f} seconds")
-        
+
+        # Calculate route distances
+        progress_bar = st.progress(0)
+
         # Display the top 20 most connected airports chart
         display_connectivity_chart(filtered_connectivity_df, selected_countries)
         
-        # Calculate route distances
-        progress_bar = st.progress(0)
+
         
         # Prepare route distances data
         progress_bar.progress(0.3)
-        valid_routes = prepare_route_distances(routes_df, airports_df)
+        valid_routes, dist_time = time_operation(
+            "Prepare Route Distances",
+            prepare_route_distances,
+            routes_df, airports_df
+        )
         progress_bar.progress(0.8)
         
         # Display the route distance histogram
         display_route_distance_histogram(valid_routes)
+        
+        # Display the degree histogram
+        display_degree_histogram(filtered_connectivity_df)
+        
         progress_bar.progress(0.9)
         
         # Calculate and display country statistics
-        country_stats = calculate_country_distance_stats(valid_routes)
+        country_stats, country_time = time_operation(
+            "Calculate Country Distance Statistics",
+            calculate_country_distance_stats,
+            valid_routes
+        )
         display_country_stats_table(country_stats)
-        
-        # Display connectivity metrics
-        display_connectivity_metrics(filtered_connectivity_df)
-        
+
+        # Calculate and display network statistics
+        network_stats, network_time = time_operation(
+            "Calculate Network Statistics",
+            calculate_network_stats,
+            filtered_connectivity_df
+        )
+        display_network_stats(network_stats)
+
         # Display the connectivity data table
         display_connectivity_table(filtered_connectivity_df)
         
-        # Calculate and display network statistics
-        network_stats = calculate_network_stats(filtered_connectivity_df)
-        display_network_stats(network_stats)
-        
         progress_bar.progress(1.0)
+        
+        # Display execution times
+        display_execution_times()
 
 def run_ui():
     """Main function to run the Streamlit UI"""
