@@ -133,7 +133,7 @@ def prepare_route_distances(routes_df, airports_df):
         suffixes=('_source', '_dest')
     ).rename(columns={'latitude': 'dest_lat', 'longitude': 'dest_lon'})
     
-    # Calculate distance for each route
+    # Bottle neck is here because we are calling python functions in the lambda function
     route_distances_df['distance_km'] = route_distances_df.apply(
         lambda row: haversine_distance(
             row['source_lat'], row['source_lon'],
