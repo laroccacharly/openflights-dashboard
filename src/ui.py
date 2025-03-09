@@ -6,9 +6,26 @@ import plotly.express as px
 import time
 import logging
 from .data import get_data
+import math
 
 # Configure logging for UI
 logger = logging.getLogger('openflights-ui')
+
+def haversine_distance(lat1, lon1, lat2, lon2):
+    """
+    Calculate the great circle distance between two points 
+    on the earth (specified in decimal degrees)
+    """
+    # Convert decimal degrees to radians
+    lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
+    
+    # Haversine formula
+    dlon = lon2 - lon1
+    dlat = lat2 - lat1
+    a = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon/2)**2
+    c = 2 * math.asin(math.sqrt(a))
+    r = 6371  # Radius of earth in kilometers
+    return c * r
 
 def run_ui():
     # Set page configuration
@@ -198,8 +215,103 @@ def run_ui():
             fig.update_layout(xaxis_tickangle=-45)
             st.plotly_chart(fig, use_container_width=True)
             
-            # Create a scatter plot of outbound vs inbound routes
-           
+            # Calculate route distances
+            st.subheader("Route Distance Distribution")
+            
+            # Create a progress bar for the distance calculation
+            progress_bar = st.progress(0)
+            
+            # Create a dataframe with source and destination airport information
+            route_distances_df = pd.merge(
+                routes_df,
+                airports_df[['airport_id', 'latitude', 'longitude']],
+                left_on='source_airport_id',
+                right_on='airport_id',
+                how='inner'
+            ).rename(columns={'latitude': 'source_lat', 'longitude': 'source_lon'})
+            
+            route_distances_df = pd.merge(
+                route_distances_df,
+                airports_df[['airport_id', 'latitude', 'longitude']],
+                left_on='destination_airport_id',
+                right_on='airport_id',
+                how='inner'
+            ).rename(columns={'latitude': 'dest_lat', 'longitude': 'dest_lon'})
+            
+            # Update progress
+            progress_bar.progress(0.3)
+            
+            # Filter out routes with missing coordinates
+            valid_routes = route_distances_df.dropna(subset=['source_lat', 'source_lon', 'dest_lat', 'dest_lon'])
+            
+            # Update progress
+            progress_bar.progress(0.5)
+            
+            # Calculate distances for each route
+            valid_routes['distance_km'] = valid_routes.apply(
+                lambda row: haversine_distance(
+                    row['source_lat'], row['source_lon'], 
+                    row['dest_lat'], row['dest_lon']
+                ),
+                axis=1
+            )
+            
+            # Update progress
+            progress_bar.progress(0.8)
+            
+            # Create a histogram of route distances
+            fig_dist = px.histogram(
+                valid_routes,
+                x='distance_km',
+                nbins=50,
+                title="Distribution of Flight Route Distances",
+                labels={'distance_km': 'Distance (km)', 'count': 'Number of Routes'},
+                marginal="box"  # Add a box plot on the marginal axis
+            )
+            
+            # Add some statistics as annotations
+            avg_distance = valid_routes['distance_km'].mean()
+            median_distance = valid_routes['distance_km'].median()
+            max_distance = valid_routes['distance_km'].max()
+            
+            fig_dist.add_annotation(
+                x=0.95, y=0.95,
+                xref="paper", yref="paper",
+                text=f"Average: {avg_distance:.0f} km<br>Median: {median_distance:.0f} km<br>Max: {max_distance:.0f} km",
+                showarrow=False,
+                font=dict(size=12),
+                bgcolor="black",
+                bordercolor="white",
+                borderwidth=1
+            )
+            
+            # Complete progress
+            progress_bar.progress(1.0)
+            
+            # Display the histogram
+            st.plotly_chart(fig_dist, use_container_width=True)
+            
+            # Add a table with distance statistics by continent or region
+            if 'country' in valid_routes.columns:
+                st.subheader("Distance Statistics by Country")
+                
+                # Group by country and calculate statistics
+                country_stats = valid_routes.groupby('country').agg(
+                    avg_distance=('distance_km', 'mean'),
+                    median_distance=('distance_km', 'median'),
+                    max_distance=('distance_km', 'max'),
+                    min_distance=('distance_km', 'min'),
+                    route_count=('distance_km', 'count')
+                ).reset_index().sort_values('route_count', ascending=False)
+                
+                # Format the distances
+                country_stats['avg_distance'] = country_stats['avg_distance'].round(0).astype(int)
+                country_stats['median_distance'] = country_stats['median_distance'].round(0).astype(int)
+                country_stats['max_distance'] = country_stats['max_distance'].round(0).astype(int)
+                country_stats['min_distance'] = country_stats['min_distance'].round(0).astype(int)
+                
+                # Display the table
+                st.dataframe(country_stats.head(20), use_container_width=True)
             
             # Display connectivity statistics
             col1, col2, col3 = st.columns(3)
