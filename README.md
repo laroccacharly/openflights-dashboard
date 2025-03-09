@@ -12,6 +12,9 @@ The dashboard uses two main datasets from OpenFlights:
 1. **Airports Database**: Contains information about airports worldwide, including location, codes, and other metadata.
 2. **Routes Database**: Contains information about flight routes between airports, including airlines, equipment, and other details.
 
+
+Link: [OpenFlights Data](https://openflights.org/data.php#:~:text=As%20of%20January%202017%2C%20the,entry%20contains%20the%20following%20information)
+
 ## Setup Instructions
 
 ### Prerequisites
