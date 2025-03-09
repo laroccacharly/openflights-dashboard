@@ -4,15 +4,13 @@ Data management module for OpenFlights dashboard.
 This module handles downloading, caching, and loading the OpenFlights datasets.
 """
 
-import os
 import requests
-# import fireducks.pandas as pd
-from .pandas import pd 
+from . import pandas as pd_module
 import time
 import logging
 import sys
 from pathlib import Path
-from typing import Dict, Optional, Tuple, List
+from typing import Dict, Optional, Tuple, List, Any
 
 # Configure logging
 logging.basicConfig(
@@ -48,104 +46,86 @@ ROUTES_COLUMNS = [
 def ensure_data_dir() -> Path:
     """Ensure the data directory exists and return its path."""
     # Use the Docker container path if it exists, otherwise use local path
-    data_dir = DATA_DIR if DATA_DIR.exists() else LOCAL_DATA_DIR
+    if DATA_DIR.exists():
+        data_dir = DATA_DIR
+    else:
+        data_dir = LOCAL_DATA_DIR
+        
+    # Create the directory if it doesn't exist
     data_dir.mkdir(exist_ok=True)
+    
     return data_dir
 
 def download_file(url: str, filename: str) -> Path:
-    """
-    Download a file from a URL and save it to the data directory.
-    
-    Args:
-        url: The URL to download from
-        filename: The name to save the file as
-        
-    Returns:
-        Path to the downloaded file
-    """
+    """Download a file from a URL and save it to the data directory."""
     data_dir = ensure_data_dir()
     raw_file_path = data_dir / filename
     
-    # Generate the parquet filename by replacing the extension
-    parquet_filename = filename.rsplit('.', 1)[0] + '.parquet'
-    parquet_file_path = data_dir / parquet_filename
+    # If the file already exists, return its path
+    if raw_file_path.exists():
+        print(f"File {filename} already exists, skipping download")
+        return raw_file_path
     
-    # Check if parquet file already exists
-    if parquet_file_path.exists():
-        print(f"Using cached {parquet_filename}")
-        return parquet_file_path
+    # Download the file
+    print(f"Downloading {url} to {raw_file_path}")
+    response = requests.get(url)
+    response.raise_for_status()
     
-    # Download the raw file if it doesn't exist
-    if not raw_file_path.exists():
-        print(f"Downloading {url} to {raw_file_path}")
-        response = requests.get(url)
-        response.raise_for_status()  # Raise an exception for HTTP errors
-        
-        with open(raw_file_path, 'wb') as f:
-            f.write(response.content)
-        print(f"Downloaded {filename} successfully")
-    else:
-        print(f"Using cached {filename}")
+    # Save the file
+    with open(raw_file_path, 'wb') as f:
+        f.write(response.content)
     
-    # Return the raw file path - the loading functions will handle conversion to parquet
     return raw_file_path
 
-def load_airports() -> pd.DataFrame:
+def load_airports() -> Any:
     """
     Load the airports dataset.
-    
-    Returns:
-        DataFrame containing airport data
+    Returns a DataFrame with airport information.
     """
     data_dir = ensure_data_dir()
     parquet_file_path = data_dir / "airports.parquet"
     
-    # Check if parquet file exists
+    # If the parquet file exists, load it directly
     if parquet_file_path.exists():
         print(f"Loading airports from parquet file")
-        return pd.read_parquet(parquet_file_path)
+        return pd_module.read_parquet(parquet_file_path)
     
     # If not, download and process the raw file
     file_path = download_file(AIRPORTS_URL, "airports.dat")
     
     # Load the data with proper column names
-    df = pd.read_csv(
+    df = pd_module.read_csv(
         file_path,
         header=None,
         names=AIRPORTS_COLUMNS,
         na_values=["\\N", ""],
         keep_default_na=True,
-        encoding='utf-8',
-        quotechar='"',
-        escapechar='\\'
+        encoding='utf-8'
     )
     
-    # Save as parquet for future use
+    # Save as parquet for faster loading next time
     df.to_parquet(parquet_file_path, index=False)
-    print(f"Saved airports data to {parquet_file_path}")
     
     return df
 
-def load_routes() -> pd.DataFrame:
+def load_routes() -> Any:
     """
     Load the routes dataset.
-    
-    Returns:
-        DataFrame containing route data
+    Returns a DataFrame with route information.
     """
     data_dir = ensure_data_dir()
     parquet_file_path = data_dir / "routes.parquet"
     
-    # Check if parquet file exists
+    # If the parquet file exists, load it directly
     if parquet_file_path.exists():
         print(f"Loading routes from parquet file")
-        return pd.read_parquet(parquet_file_path)
+        return pd_module.read_parquet(parquet_file_path)
     
     # If not, download and process the raw file
     file_path = download_file(ROUTES_URL, "routes.dat")
     
     # Load the data with proper column names
-    df = pd.read_csv(
+    df = pd_module.read_csv(
         file_path,
         header=None,
         names=ROUTES_COLUMNS,
@@ -154,23 +134,23 @@ def load_routes() -> pd.DataFrame:
         encoding='utf-8'
     )
     
-    # Save as parquet for future use
+    # Save as parquet for faster loading next time
     df.to_parquet(parquet_file_path, index=False)
-    print(f"Saved routes data to {parquet_file_path}")
     
     return df
 
-def get_data() -> Tuple[pd.DataFrame, pd.DataFrame]:
+def get_data() -> Tuple[Any, Any]:
     """
     Get both airports and routes datasets.
-    
-    Returns:
-        Tuple of (airports_df, routes_df)
+    Returns a tuple of (airports_df, routes_df).
     """
+    start_time = time.time()
+    
     airports_df = load_airports()
     routes_df = load_routes()
     
-    print(f"Loaded {len(airports_df)} airports and {len(routes_df)} routes")
+    print(f"Data loaded in {time.time() - start_time:.2f} seconds")
+    print(f"Airports: {len(airports_df)} rows, Routes: {len(routes_df)} rows")
     
     return airports_df, routes_df
 

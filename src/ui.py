@@ -1,12 +1,10 @@
 import streamlit as st
-from .pandas import pd 
-import os
-import numpy as np
 import plotly.express as px
 import time
 import logging
 from .data import get_data
 import math
+from . import pandas as pd_module  # Import the module with all pandas functions
 
 # Configure logging for UI
 logger = logging.getLogger('openflights-ui')
@@ -14,8 +12,6 @@ logger = logging.getLogger('openflights-ui')
 # ===== Utility Functions =====
 
 def haversine_distance(lat1, lon1, lat2, lon2):
-
-    
     # Calculate the distance if not in cache
     # Convert decimal degrees to radians
     lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
@@ -33,8 +29,12 @@ def haversine_distance(lat1, lon1, lat2, lon2):
 
 def load_data(st):
     """Load the OpenFlights data if not already in session state"""
+    # Display current backend info
+    backend = pd_module.CURRENT_BACKEND
+    st.sidebar.info(f"Currently using: {backend.capitalize()} backend")
+    
     if 'airports_df' not in st.session_state or 'routes_df' not in st.session_state:
-        with st.spinner("Loading OpenFlights data..."):
+        with st.spinner(f"Loading OpenFlights data using {backend.capitalize()}..."):
             try:
                 st.session_state.airports_df, st.session_state.routes_df = get_data()
             except Exception as e:
@@ -75,52 +75,48 @@ def get_valid_map_data(airports_df, sampling_ratio=1.0):
 # ===== Computation Functions =====
 
 def calculate_connectivity_stats(airports_df, routes_df):
-    """Calculate airport connectivity statistics"""
-    # Outbound routes (departures)
-    outbound_routes = routes_df.groupby('source_airport_id').size().reset_index(name='outbound_routes')
+    """Calculate connectivity statistics for airports"""
+    # Count outbound routes per airport
+    outbound_routes = routes_df.groupby('source_airport_id').size().reset_index()
+    outbound_routes.columns = ['airport_id', 'outbound_routes']
     
-    # Inbound routes (arrivals)
-    inbound_routes = routes_df.groupby('destination_airport_id').size().reset_index(name='inbound_routes')
+    # Count inbound routes per airport
+    inbound_routes = routes_df.groupby('destination_airport_id').size().reset_index()
+    inbound_routes.columns = ['airport_id', 'inbound_routes']
     
     # Join with airports data
     # First, join with outbound routes
-    connectivity_df = pd.merge(
+    connectivity_df = pd_module.merge(
         airports_df,
         outbound_routes,
-        left_on='airport_id',
-        right_on='source_airport_id',
+        on='airport_id',
         how='left'
     )
     
     # Then, join with inbound routes
-    connectivity_df = pd.merge(
+    connectivity_df = pd_module.merge(
         connectivity_df,
         inbound_routes,
-        left_on='airport_id',
-        right_on='destination_airport_id',
+        on='airport_id',
         how='left'
     )
     
-    # Fill NaN values with 0 (airports with no routes)
+    # Fill NaN values with 0
     connectivity_df['outbound_routes'] = connectivity_df['outbound_routes'].fillna(0).astype(int)
     connectivity_df['inbound_routes'] = connectivity_df['inbound_routes'].fillna(0).astype(int)
     
-    # Calculate total connectivity (sum of inbound and outbound routes)
-    connectivity_df['total_connectivity'] = connectivity_df['outbound_routes'] + connectivity_df['inbound_routes']
+    # Calculate total routes
+    connectivity_df['total_routes'] = connectivity_df['outbound_routes'] + connectivity_df['inbound_routes']
     
-    # Calculate connectivity ratio (outbound/inbound)
-    connectivity_df['connectivity_ratio'] = np.where(
-        connectivity_df['inbound_routes'] > 0,
-        connectivity_df['outbound_routes'] / connectivity_df['inbound_routes'],
-        np.nan
-    )
+    # Calculate degree (total connections)
+    connectivity_df['degree'] = connectivity_df['total_routes']
     
     return connectivity_df
 
 def prepare_route_distances(routes_df, airports_df):
     """Calculate distances for each route"""
     # Create a dataframe with source and destination airport information
-    route_distances_df = pd.merge(
+    route_distances_df = pd_module.merge(
         routes_df,
         airports_df[['airport_id', 'latitude', 'longitude']],
         left_on='source_airport_id',
@@ -128,27 +124,25 @@ def prepare_route_distances(routes_df, airports_df):
         how='inner'
     ).rename(columns={'latitude': 'source_lat', 'longitude': 'source_lon'})
     
-    route_distances_df = pd.merge(
+    route_distances_df = pd_module.merge(
         route_distances_df,
         airports_df[['airport_id', 'latitude', 'longitude']],
         left_on='destination_airport_id',
         right_on='airport_id',
-        how='inner'
+        how='inner',
+        suffixes=('_source', '_dest')
     ).rename(columns={'latitude': 'dest_lat', 'longitude': 'dest_lon'})
     
-    # Filter out routes with missing coordinates
-    valid_routes = route_distances_df.dropna(subset=['source_lat', 'source_lon', 'dest_lat', 'dest_lon'])
-    
-    # Calculate distances for each route
-    valid_routes['distance_km'] = valid_routes.apply(
+    # Calculate distance for each route
+    route_distances_df['distance_km'] = route_distances_df.apply(
         lambda row: haversine_distance(
-            row['source_lat'], row['source_lon'], 
+            row['source_lat'], row['source_lon'],
             row['dest_lat'], row['dest_lon']
         ),
         axis=1
     )
     
-    return valid_routes
+    return route_distances_df
 
 def calculate_country_distance_stats(valid_routes):
     """Calculate distance statistics by country"""
@@ -175,13 +169,13 @@ def calculate_country_distance_stats(valid_routes):
 def calculate_network_stats(connectivity_df):
     """Calculate network statistics"""
     # Number of airports with at least one route
-    connected_airports = len(connectivity_df[connectivity_df['total_connectivity'] > 0])
+    connected_airports = len(connectivity_df[connectivity_df['total_routes'] > 0])
     
     # Percentage of airports that are connected
     connected_percentage = (connected_airports / len(connectivity_df)) * 100
     
     # Average degree (average number of connections per airport)
-    avg_degree = connectivity_df['total_connectivity'].mean()
+    avg_degree = connectivity_df['total_routes'].mean()
     
     return {
         'connected_airports': connected_airports,
@@ -224,7 +218,7 @@ def display_header():
 def setup_sidebar_filters(st, airports_df):
     """Set up the sidebar filters and return the filter values"""
     st.sidebar.title("Filters")
-
+    
     # Sampling ratio slider for performance
     sampling_ratio = st.sidebar.slider(
         "Map Sampling Ratio",
@@ -243,6 +237,37 @@ def setup_sidebar_filters(st, airports_df):
         default=[]
     )
     
+    # Backend selection
+    st.sidebar.subheader("Data Backend")
+    
+    # Get current backend
+    current_backend = pd_module.CURRENT_BACKEND
+    
+    # Create radio buttons for backend selection
+    backend = st.sidebar.radio(
+        "Select Data Processing Backend",
+        options=['pandas', 'fireducks'],
+        index=0 if current_backend == 'pandas' else 1,
+        help="Choose between standard pandas or fireducks (pandas-compatible) for data processing."
+    )
+    
+    # If the backend selection has changed
+    if backend != current_backend:
+        # Set the backend in the pandas module
+        pd_module.set_backend(backend)
+        
+        # Clear the data from session state to force reload with new backend
+        if 'airports_df' in st.session_state:
+            del st.session_state.airports_df
+        if 'routes_df' in st.session_state:
+            del st.session_state.routes_df
+            
+        # Show a message about the backend change
+        st.sidebar.success(f"Switched to {backend} backend. Data will reload.")
+        
+        # Add a rerun to apply changes immediately
+        st.rerun()
+
     return sampling_ratio, selected_countries
 
 def display_basic_metrics(filtered_airports, routes_df):
@@ -296,17 +321,17 @@ def display_connectivity_chart(connectivity_df, selected_countries):
         connectivity_df = connectivity_df[connectivity_df['country'].isin(selected_countries)]
     
     # Get top 20 most connected airports
-    top_connected = connectivity_df.sort_values('total_connectivity', ascending=False).head(20)
+    top_connected = connectivity_df.sort_values('total_routes', ascending=False).head(20)
     
     # Create a bar chart for the top connected airports
     fig = px.bar(
         top_connected,
         x='name',
-        y='total_connectivity',
+        y='total_routes',
         hover_data=['city', 'country', 'outbound_routes', 'inbound_routes'],
         color='country',
         title="Top 20 Most Connected Airports",
-        labels={'name': 'Airport', 'total_connectivity': 'Total Routes (In + Out)'}
+        labels={'name': 'Airport', 'total_routes': 'Total Routes (In + Out)'}
     )
     
     fig.update_layout(xaxis_tickangle=-45)
@@ -350,17 +375,17 @@ def display_degree_histogram(connectivity_df):
     # Create a histogram of degree distribution
     fig_degree = px.histogram(
         connectivity_df,
-        x='total_connectivity',
+        x='total_routes',
         nbins=50,
         title="Distribution of Airport Connectivity Degrees (In + Out)",
-        labels={'total_connectivity': 'Degree (Total Routes)', 'count': 'Number of Airports'},
+        labels={'total_routes': 'Degree (Total Routes)', 'count': 'Number of Airports'},
         marginal="box"  # Add a box plot on the marginal axis
     )
     
     # Add some statistics as annotations
-    avg_degree = connectivity_df['total_connectivity'].mean()
-    median_degree = connectivity_df['total_connectivity'].median()
-    max_degree = connectivity_df['total_connectivity'].max()
+    avg_degree = connectivity_df['total_routes'].mean()
+    median_degree = connectivity_df['total_routes'].median()
+    max_degree = connectivity_df['total_routes'].max()
     
     fig_degree.add_annotation(
         x=0.95, y=0.95,
@@ -384,7 +409,7 @@ def display_connectivity_metrics(connectivity_df):
     with col2:
         st.metric("Avg. Inbound Routes", f"{connectivity_df['inbound_routes'].mean():.1f}")
     with col3:
-        st.metric("Max Total Connectivity", int(connectivity_df['total_connectivity'].max()))
+        st.metric("Max Total Routes", int(connectivity_df['total_routes'].max()))
 
 def display_connectivity_table(connectivity_df):
     """Display the connectivity data table"""
@@ -392,8 +417,8 @@ def display_connectivity_table(connectivity_df):
     st.dataframe(
         connectivity_df[[
             'name', 'city', 'country', 'iata', 
-            'outbound_routes', 'inbound_routes', 'total_connectivity', 'connectivity_ratio'
-        ]].sort_values('total_connectivity', ascending=False),
+            'outbound_routes', 'inbound_routes', 'total_routes', 'degree'
+        ]].sort_values('total_routes', ascending=False),
         use_container_width=True
     )
 
@@ -418,18 +443,23 @@ def display_country_stats_table(country_stats):
 def display_footer():
     """Display the footer with data source information"""
     st.markdown("---")
-    st.markdown("Data source: [OpenFlights](https://openflights.org)")
+    
+    # Create footer with data source and backend info
+    st.markdown(f"""
+    **Data source:** [OpenFlights](https://openflights.org)  
+    """)
+    
 
 def display_execution_times():
     """Display execution times for all tracked computations"""
     st.subheader("Operation Execution Times")
     
     if 'execution_times' not in st.session_state or not st.session_state.execution_times:
-        st.info("No operations have been timed yet.")
+        st.info("No execution times recorded yet.")
         return
     
     # Create a dataframe from the execution times
-    times_df = pd.DataFrame({
+    times_df = pd_module.DataFrame({
         'Operation': list(st.session_state.execution_times.keys()),
         'Execution Time (seconds)': list(st.session_state.execution_times.values())
     })
