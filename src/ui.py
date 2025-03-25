@@ -5,6 +5,7 @@ import logging
 from .data import get_data
 import math
 from . import pandas as pd_module  # Import the module with all pandas functions
+import numpy as np  # Add this import at the top of the file
 
 # Configure logging for UI
 logger = logging.getLogger('openflights-ui')
@@ -12,8 +13,6 @@ logger = logging.getLogger('openflights-ui')
 # ===== Utility Functions =====
 
 def haversine_distance(lat1, lon1, lat2, lon2):
-    # Calculate the distance if not in cache
-    # Convert decimal degrees to radians
     lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
     
     # Haversine formula
@@ -22,6 +21,22 @@ def haversine_distance(lat1, lon1, lat2, lon2):
     a = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon/2)**2
     c = 2 * math.asin(math.sqrt(a))
     r = 6371  # Radius of earth in kilometers
+    distance = c * r
+    return distance
+
+def opt_haversine_distance(sample, src_lat, src_lon, dst_lat, dst_lon):
+    rad_sample = np.radians(sample[[src_lat, src_lon, dst_lat, dst_lon]])
+    lat1 = rad_sample[src_lat]
+    lat2 = rad_sample[dst_lat]
+    lon1 = rad_sample[src_lon]
+    lon2 = rad_sample[dst_lon]
+
+    # Haversine formula
+    dlon = lon2 - lon1
+    dlat = lat2 - lat1
+    a = np.sin(dlat/2)**2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon/2)**2
+    c = 2 * np.arcsin(np.sqrt(a))
+    r = 6371  # Radius of Earth in kilometers
     distance = c * r
     return distance
 
@@ -114,7 +129,7 @@ def calculate_connectivity_stats(airports_df, routes_df):
     return connectivity_df
 
 def prepare_route_distances(routes_df, airports_df):
-    """Calculate distances for each route"""
+    """Calculate distances for each route using optimized NumPy method"""
     # Create a dataframe with source and destination airport information
     route_distances_df = pd_module.merge(
         routes_df,
@@ -133,13 +148,11 @@ def prepare_route_distances(routes_df, airports_df):
         suffixes=('_source', '_dest')
     ).rename(columns={'latitude': 'dest_lat', 'longitude': 'dest_lon'})
     
-    # Bottle neck is here because we are calling python functions in the lambda function
-    route_distances_df['distance_km'] = route_distances_df.apply(
-        lambda row: haversine_distance(
-            row['source_lat'], row['source_lon'],
-            row['dest_lat'], row['dest_lon']
-        ),
-        axis=1
+    # Use the optimized haversine distance calculation
+    route_distances_df['distance_km'] = opt_haversine_distance(
+        route_distances_df,
+        'source_lat', 'source_lon',
+        'dest_lat', 'dest_lon'
     )
     
     return route_distances_df
