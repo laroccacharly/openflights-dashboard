@@ -1,10 +1,10 @@
-# fly.toml app configuration file generated for openflights-dashboard on 2025-03-09T09:33:38-04:00
+# fly.toml app configuration file generated for openflights-dashboard on 2025-06-17T07:55:37-04:00
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
 app = 'openflights-dashboard'
-primary_region = 'yul'
+primary_region = 'ewr'
 
 [build]
 
@@ -20,5 +20,3 @@ primary_region = 'yul'
   memory = '1gb'
   cpu_kind = 'shared'
   cpus = 1
-  count = 1
-
